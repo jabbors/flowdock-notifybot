@@ -32,3 +32,12 @@ func (u Users) Print() {
 		fmt.Printf("%s:%s\n", nick, id)
 	}
 }
+
+// Users returns the existign users
+func (u Users) Users() string {
+	users := []string{}
+	for nick, _ := range u {
+		users = append(users, nick)
+	}
+	return fmt.Sprintf("%v", users)
+}

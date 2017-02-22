@@ -135,8 +135,8 @@ func main() {
 	}
 
 	users = NewUsers()
-	for userID, _ := range c.Users {
-		users.Add(c.Users[userID].Nick, userID)
+	for userID, user := range c.Users {
+		users.Add(user.Nick, userID)
 	}
 	users.Print()
 	roles = NewRoles()
@@ -498,8 +498,8 @@ func main() {
 					for _, flow := range c.AvailableFlows {
 						flows[flow.ID] = flow
 					}
-					for userID, _ := range c.Users {
-						users.Add(c.Users[userID].Nick, userID)
+					for userID, user := range c.Users {
+						users.Add(user.Nick, userID)
 					}
 				}
 			case nil:
