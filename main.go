@@ -209,6 +209,7 @@ func main() {
 								var err error
 								if flowID != "" && notif.Flow != flowID {
 									// just delete the notification and continue
+									log.Printf("Skipping ping due to run in test mode (%s != %s)", notif.Flow, flowID)
 									notifications.Delete(userID, threadID)
 									notifications.Save(notificationStorage)
 									continue
