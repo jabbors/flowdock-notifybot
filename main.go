@@ -89,7 +89,11 @@ func createNotifyTimeAndTag(prefix, username string, location *time.Location) (t
 
 func main() {
 	var configFile string
+	var debug bool
+	var flowID string
 	flag.StringVar(&configFile, "config", "config.yaml", "Config file to read settings from")
+	flag.BoolVar(&debug, "debug", false, "Run in debug mode, no pings will be sent")
+	flag.StringVar(&flowID, "flow-id", "", "Run in test mode, pings only sent in this flow (organisation:flowname)")
 	flag.Parse()
 
 	// Read settings from config file
@@ -132,6 +136,19 @@ func main() {
 	err = c.Connect(nil, events)
 	if err != nil {
 		panic(err)
+	}
+
+	// sanity check for flowID
+	if flowID != "" {
+		isKnowFlowID := false
+		for _, flow := range c.AvailableFlows {
+			if flow.ID == flowID {
+				isKnowFlowID = true
+			}
+		}
+		if !isKnowFlowID {
+			panic("flowID is not available with the given API key")
+		}
 	}
 
 	users = NewUsers()
@@ -187,15 +204,23 @@ func main() {
 							log.Printf("Sending notification due to no activity, %s after %s", notif.Timestamp, time.Now())
 							pingUser := c.Users[userID].Nick
 							message := fmt.Sprintf("@%v, slow ping from %v from [here](https://www.flowdock.com/app/walkbase/%s/messages/%d)", pingUser, strings.Title(notif.Pinger), flows[notif.Flow].APIName, notif.MessageID)
-							var body []byte
-							var err error
-							if notif.Thread != "" {
-								body, err = flowdock.SendMessageToFlowWithApiKey(flowdockAPIKey, notif.Flow, notif.Thread, message)
+							if !debug {
+								var body []byte
+								var err error
+								if flowID != "" && notif.Flow != flowID {
+									// just delete the notification and continue
+									notifications.Delete(userID, threadID)
+									notifications.Save(notificationStorage)
+									continue
+								}
+								if notif.Thread != "" {
+									body, err = flowdock.SendMessageToFlowWithApiKey(flowdockAPIKey, notif.Flow, notif.Thread, message)
+								}
+								if err != nil {
+									log.Panic(err)
+								}
+								log.Printf("%v\n", string(body))
 							}
-							if err != nil {
-								log.Panic(err)
-							}
-							log.Printf("%v\n", string(body))
 							notifications.Delete(userID, threadID)
 							notifications.Save(notificationStorage)
 						}
