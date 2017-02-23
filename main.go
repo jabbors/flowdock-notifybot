@@ -110,7 +110,8 @@ func main() {
 	// override defaults
 	flowdockAPIKey = conf.FlowdockAPIKey
 	if conf.StoragePath != "" {
-		notificationStorage = conf.StoragePath
+		notificationStorage = conf.StoragePath + "/flowdock_notifications"
+		roleStorage = conf.StoragePath + "/flowdock_roles"
 	}
 	if conf.PingPrefix != 0 {
 		pingPrefix = string(pingPrefix)
