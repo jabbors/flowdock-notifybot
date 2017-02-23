@@ -39,6 +39,8 @@ var slowPrefix = "!"
 var fastPrefix = "!!"
 var fasterPrefix = "!!!"
 var rolePrefix = "&"
+var notifRegex *regexp.Regexp
+var roleRegex *regexp.Regexp
 var notifications Notifications
 var users Users
 var roles Roles
@@ -85,6 +87,109 @@ func createNotifyTimeAndTag(prefix, username string, location *time.Location) (t
 	}
 
 	return t, tag
+}
+
+// pingHandler creates possible notifications from a message
+func pingHandler(org, flow, message, pinger, threadID, eventFlow string, eventID int64, location *time.Location) {
+	for _, field := range notifRegex.FindAllStringSubmatch(message, -1) {
+		if len(field) < 2 {
+			continue
+		}
+		possiblePrefix := field[1]
+		possibleTarget := strings.ToLower(field[2])
+		targets := []string{}
+		if users.Exists(possibleTarget) {
+			targets = append(targets, possibleTarget)
+		} else if roles.Exists(possibleTarget) {
+			targets = append(targets, roles[possibleTarget]...)
+		}
+		if len(targets) == 0 {
+			log.Printf("User or Role '%s' does not exists", possibleTarget)
+			continue
+		}
+
+		for _, target := range targets {
+			notifyTime, notifyTag := createNotifyTimeAndTag(possiblePrefix, target, location)
+			if !notifyTime.IsZero() {
+				log.Printf("%s requested notification for %s at %v", pinger, target, notifyTime)
+				notification := NewNotification(notifyTime, pinger, threadID, eventFlow, eventID)
+				notifications.Add(notification, users[target], eventFlow)
+				flowdock.EditMessageInFlowWithApiKey(flowdockAPIKey, org, flow, strconv.FormatInt(eventID, 10), "", []string{notifyTag})
+				notifications.Save(notificationStorage)
+			} else {
+				log.Println("No time was set for notification")
+			}
+		}
+	}
+}
+
+// roleHandler makes possible role modifications based on a message
+func roleHandler(org, flow, message string, eventID int64) {
+	for _, field := range roleRegex.FindAllStringSubmatch(message, -1) {
+		if len(field) < 4 {
+			continue
+		}
+		possibleRoleName := field[2]
+		possibleRoleAction := field[3]
+		possibleRoleUsers := strings.Split(field[4], ",")
+		roleUsers := []string{}
+		// list users in role if requested
+		if roles.Exists(possibleRoleName) && len(possibleRoleUsers) == 1 && possibleRoleUsers[0] == "list" && possibleRoleAction == "=" {
+			flowdock.EditMessageInFlowWithApiKey(flowdockAPIKey, org, flow, strconv.FormatInt(eventID, 10), "", []string{roles.Users(possibleRoleName)})
+			log.Println("listing users in role", possibleRoleName)
+			continue
+		}
+		// delete role if requested
+		if roles.Exists(possibleRoleName) && len(possibleRoleUsers) == 1 && possibleRoleUsers[0] == "delete" && possibleRoleAction == "=" {
+			roleNotifyTag := roles.DeleteNotifyTag(possibleRoleName)
+			roles.Delete(possibleRoleName)
+			roles.Save(roleStorage)
+			if roleNotifyTag != "" {
+				flowdock.EditMessageInFlowWithApiKey(flowdockAPIKey, org, flow, strconv.FormatInt(eventID, 10), "", []string{roleNotifyTag})
+			}
+			continue
+		}
+		// filter unknown users
+		for _, possibleRoleUser := range possibleRoleUsers {
+			if users.Exists(possibleRoleUser) {
+				roleUsers = append(roleUsers, possibleRoleUser)
+			}
+		}
+		// if skip if no user was found
+		if len(roleUsers) == 0 {
+			log.Println("no users to add/remove/set")
+			continue
+		}
+
+		switch possibleRoleAction {
+		case "+":
+			roleNotifyTag := roles.AddNotifyTag(possibleRoleName, roleUsers)
+			roles.Add(possibleRoleName, roleUsers)
+			roles.Save(roleStorage)
+			if roleNotifyTag != "" {
+				flowdock.EditMessageInFlowWithApiKey(flowdockAPIKey, org, flow, strconv.FormatInt(eventID, 10), "", []string{roleNotifyTag})
+			}
+			break
+		case "-":
+			roleNotifyTag := roles.RemoveNotifyTag(possibleRoleName, roleUsers)
+			roles.Remove(possibleRoleName, roleUsers)
+			roles.Save(roleStorage)
+			if roleNotifyTag != "" {
+				flowdock.EditMessageInFlowWithApiKey(flowdockAPIKey, org, flow, strconv.FormatInt(eventID, 10), "", []string{roleNotifyTag})
+			}
+			break
+		case "=":
+			roleNotifyTag := roles.SetNotifyTag(possibleRoleName, roleUsers)
+			roles.Set(possibleRoleName, roleUsers)
+			roles.Save(roleStorage)
+			if roleNotifyTag != "" {
+				flowdock.EditMessageInFlowWithApiKey(flowdockAPIKey, org, flow, strconv.FormatInt(eventID, 10), "", []string{roleNotifyTag})
+			}
+			break
+		default:
+			log.Printf("Unknown role action '%s'", possibleRoleAction)
+		}
+	}
 }
 
 func main() {
@@ -168,10 +273,10 @@ func main() {
 	}
 
 	// build regex for matching pings
-	notifRegex := regexp.MustCompile(fmt.Sprintf(`(\%s+)([\wåäö]+)`, pingPrefix))
+	notifRegex = regexp.MustCompile(fmt.Sprintf(`(\%s+)([\wåäö]+)`, pingPrefix))
 	// and for matching role actions
 	// syntax &[<rolename>][+|-|=][all|<username>](,<username>)
-	roleRegex := regexp.MustCompile(fmt.Sprintf(`(\%s)([\wåäö]+)([+-=])([\wåäö,]+)`, rolePrefix))
+	roleRegex = regexp.MustCompile(fmt.Sprintf(`(\%s)([\wåäö]+)([+-=])([\wåäö,]+)`, rolePrefix))
 
 	pingHelpMessage := "Notifybot does slow notifications."
 	pingHelpMessage += " Create a slow notification for a person by doing " + slowPrefix + "<nick> or " + fastPrefix + "<nick> or " + fasterPrefix + "<nick>."
@@ -266,102 +371,9 @@ func main() {
 					flowdock.SendMessageToFlowWithApiKey(flowdockAPIKey, event.Flow, event.ThreadID, roles.Roles())
 				}
 
-				for _, field := range notifRegex.FindAllStringSubmatch(event.Content, -1) {
-					if len(field) < 2 {
-						continue
-					}
-					possiblePrefix := field[1]
-					possibleTarget := strings.ToLower(field[2])
-					targets := []string{}
-					if users.Exists(possibleTarget) {
-						targets = append(targets, possibleTarget)
-					} else if roles.Exists(possibleTarget) {
-						targets = append(targets, roles[possibleTarget]...)
-					}
-					if len(targets) == 0 {
-						log.Printf("User or Role '%s' does not exists", possibleTarget)
-						continue
-					}
-					pinger := c.Users[event.UserID].Nick
-
-					for _, target := range targets {
-						notifyTime, notifyTag := createNotifyTimeAndTag(possiblePrefix, target, location)
-						if !notifyTime.IsZero() {
-							log.Printf("%s requested notification for %s at %v", pinger, target, notifyTime)
-							notification := NewNotification(notifyTime, pinger, event.ThreadID, event.Flow, event.ID)
-							notifications.Add(notification, users[target], event.ThreadID)
-							flowdock.EditMessageInFlowWithApiKey(flowdockAPIKey, org, flow, strconv.FormatInt(event.ID, 10), "", []string{notifyTag})
-							notifications.Save(notificationStorage)
-						} else {
-							log.Println("No time was set for notification")
-						}
-					}
-				}
-				for _, field := range roleRegex.FindAllStringSubmatch(event.Content, -1) {
-					if len(field) < 4 {
-						continue
-					}
-					possibleRoleName := field[2]
-					possibleRoleAction := field[3]
-					possibleRoleUsers := strings.Split(field[4], ",")
-					roleUsers := []string{}
-					// list users in role if requested
-					if roles.Exists(possibleRoleName) && len(possibleRoleUsers) == 1 && possibleRoleUsers[0] == "list" && possibleRoleAction == "=" {
-						flowdock.EditMessageInFlowWithApiKey(flowdockAPIKey, org, flow, strconv.FormatInt(event.ID, 10), "", []string{roles.Users(possibleRoleName)})
-						log.Println("listing users in role", possibleRoleName)
-						continue
-					}
-					// delete role if requested
-					if roles.Exists(possibleRoleName) && len(possibleRoleUsers) == 1 && possibleRoleUsers[0] == "delete" && possibleRoleAction == "=" {
-						roleNotifyTag := roles.DeleteNotifyTag(possibleRoleName)
-						roles.Delete(possibleRoleName)
-						roles.Save(roleStorage)
-						if roleNotifyTag != "" {
-							flowdock.EditMessageInFlowWithApiKey(flowdockAPIKey, org, flow, strconv.FormatInt(event.ID, 10), "", []string{roleNotifyTag})
-						}
-						continue
-					}
-					// filter unknown users
-					for _, possibleRoleUser := range possibleRoleUsers {
-						if users.Exists(possibleRoleUser) {
-							roleUsers = append(roleUsers, possibleRoleUser)
-						}
-					}
-					// if skip if no user was found
-					if len(roleUsers) == 0 {
-						log.Println("no users to add/remove/set")
-						continue
-					}
-
-					switch possibleRoleAction {
-					case "+":
-						roleNotifyTag := roles.AddNotifyTag(possibleRoleName, roleUsers)
-						roles.Add(possibleRoleName, roleUsers)
-						roles.Save(roleStorage)
-						if roleNotifyTag != "" {
-							flowdock.EditMessageInFlowWithApiKey(flowdockAPIKey, org, flow, strconv.FormatInt(event.ID, 10), "", []string{roleNotifyTag})
-						}
-						break
-					case "-":
-						roleNotifyTag := roles.RemoveNotifyTag(possibleRoleName, roleUsers)
-						roles.Remove(possibleRoleName, roleUsers)
-						roles.Save(roleStorage)
-						if roleNotifyTag != "" {
-							flowdock.EditMessageInFlowWithApiKey(flowdockAPIKey, org, flow, strconv.FormatInt(event.ID, 10), "", []string{roleNotifyTag})
-						}
-						break
-					case "=":
-						roleNotifyTag := roles.SetNotifyTag(possibleRoleName, roleUsers)
-						roles.Set(possibleRoleName, roleUsers)
-						roles.Save(roleStorage)
-						if roleNotifyTag != "" {
-							flowdock.EditMessageInFlowWithApiKey(flowdockAPIKey, org, flow, strconv.FormatInt(event.ID, 10), "", []string{roleNotifyTag})
-						}
-						break
-					default:
-						log.Printf("Unknown role action '%s'", possibleRoleAction)
-					}
-				}
+				pinger := c.Users[event.UserID].Nick
+				pingHandler(org, flow, event.Content, pinger, event.ThreadID, event.Flow, event.ID, location)
+				roleHandler(org, flow, event.Content, event.ID)
 				log.Printf("%s said (%s): '%s'", c.DetailsForUser(event.UserID).Nick, event.Flow, event.Content)
 			case flowdock.CommentEvent:
 				log.Println("Comment event")
@@ -408,103 +420,9 @@ func main() {
 					flowdock.SendCommentToFlowWithApiKey(flowdockAPIKey, event.Flow, messageID, roles.Roles())
 				}
 
-				for _, field := range notifRegex.FindAllStringSubmatch(event.Content.Text, -1) {
-					if len(field) < 2 {
-						continue
-					}
-					possiblePrefix := field[1]
-					possibleTarget := strings.ToLower(field[2])
-					targets := []string{}
-					if users.Exists(possibleTarget) {
-						targets = append(targets, possibleTarget)
-					} else if roles.Exists(possibleTarget) {
-						targets = append(targets, roles[possibleTarget]...)
-					}
-					if len(targets) == 0 {
-						log.Printf("User or Role '%s' does not exists", possibleTarget)
-						continue
-					}
-					pinger := c.Users[event.UserID].Nick
-
-					for _, target := range targets {
-						notifyTime, notifyTag := createNotifyTimeAndTag(possiblePrefix, target, location)
-						if !notifyTime.IsZero() {
-							log.Printf("%s requested notification for %s at %v", pinger, target, notifyTime)
-							notification := NewNotification(notifyTime, pinger, messageID, event.Flow, event.ID)
-							notifications.Add(notification, users[target], event.Flow)
-							flowdock.EditMessageInFlowWithApiKey(flowdockAPIKey, org, flow, strconv.FormatInt(event.ID, 10), "", []string{notifyTag})
-							notifications.Save(notificationStorage)
-						} else {
-							log.Println("No time was set for notification")
-						}
-					}
-				}
-				for _, field := range roleRegex.FindAllStringSubmatch(event.Content.Text, -1) {
-					if len(field) < 4 {
-						continue
-					}
-					possibleRoleName := field[2]
-					possibleRoleAction := field[3]
-					possibleRoleUsers := strings.Split(field[4], ",")
-					roleUsers := []string{}
-					// list users in role if requested
-					if roles.Exists(possibleRoleName) && len(possibleRoleUsers) == 1 && possibleRoleUsers[0] == "list" && possibleRoleAction == "=" {
-						flowdock.EditMessageInFlowWithApiKey(flowdockAPIKey, org, flow, strconv.FormatInt(event.ID, 10), "", []string{roles.Users(possibleRoleName)})
-						log.Println("listing users in role", possibleRoleName)
-						continue
-					}
-					// delete role if requested
-					if roles.Exists(possibleRoleName) && len(possibleRoleUsers) == 1 && possibleRoleUsers[0] == "delete" && possibleRoleAction == "=" {
-						roleNotifyTag := roles.DeleteNotifyTag(possibleRoleName)
-						roles.Delete(possibleRoleName)
-						roles.Save(roleStorage)
-						if roleNotifyTag != "" {
-							flowdock.EditMessageInFlowWithApiKey(flowdockAPIKey, org, flow, strconv.FormatInt(event.ID, 10), "", []string{roleNotifyTag})
-						}
-						continue
-					}
-					// filter unknown users
-					for _, possibleRoleUser := range possibleRoleUsers {
-						if users.Exists(possibleRoleUser) {
-							roleUsers = append(roleUsers, possibleRoleUser)
-						}
-					}
-					// if skip if no user was found
-					if len(roleUsers) == 0 {
-						log.Println("no users to add/remove/set")
-						continue
-					}
-
-					switch possibleRoleAction {
-					case "+":
-						roleNotifyTag := roles.AddNotifyTag(possibleRoleName, roleUsers)
-						roles.Add(possibleRoleName, roleUsers)
-						roles.Save(roleStorage)
-						if roleNotifyTag != "" {
-							flowdock.EditMessageInFlowWithApiKey(flowdockAPIKey, org, flow, strconv.FormatInt(event.ID, 10), "", []string{roleNotifyTag})
-						}
-						break
-					case "-":
-						roleNotifyTag := roles.RemoveNotifyTag(possibleRoleName, roleUsers)
-						roles.Remove(possibleRoleName, roleUsers)
-						roles.Save(roleStorage)
-						if roleNotifyTag != "" {
-							flowdock.EditMessageInFlowWithApiKey(flowdockAPIKey, org, flow, strconv.FormatInt(event.ID, 10), "", []string{roleNotifyTag})
-						}
-						break
-					case "=":
-						roleNotifyTag := roles.SetNotifyTag(possibleRoleName, roleUsers)
-						roles.Set(possibleRoleName, roleUsers)
-						roles.Save(roleStorage)
-						if roleNotifyTag != "" {
-							flowdock.EditMessageInFlowWithApiKey(flowdockAPIKey, org, flow, strconv.FormatInt(event.ID, 10), "", []string{roleNotifyTag})
-						}
-						break
-					default:
-						log.Printf("Unknown role action '%s'", possibleRoleAction)
-					}
-				}
-
+				pinger := c.Users[event.UserID].Nick
+				pingHandler(org, flow, event.Content.Text, pinger, messageID, event.Flow, event.ID, location)
+				roleHandler(org, flow, event.Content.Text, event.ID)
 				//		case flowdock.MessageEditEvent:
 				//			log.Printf("Looks like @%s just updated their previous message: '%s'. New message is '%s'", c.DetailsForUser(event.UserID).Nick, messageStore[event.Content.MessageID], event.Content.UpdatedMessage)
 			case flowdock.UserActivityEvent:
