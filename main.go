@@ -27,7 +27,7 @@ type config struct {
 
 const (
 	fastDelay   = 1 * time.Hour
-	fasterDelay = 25 * time.Minute
+	fasterDelay = 15 * time.Minute
 )
 
 // Global variables
