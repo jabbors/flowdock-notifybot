@@ -68,6 +68,17 @@ func NextWorkdayAtNine() time.Time {
 	return now
 }
 
+func organisationAndFlow(flowID string) (string, string, error) {
+	elems := strings.Split(flowID, ":")
+	if len(elems) != 2 {
+		if flows.Exists(flowID) {
+			return flows[flowID].Organization.APIName, flows[flowID].APIName, nil
+		}
+		return "", "", fmt.Errorf("unknown flow")
+	}
+	return elems[0], elems[1], nil
+}
+
 // createNotifyTimeAndTag returns the time when the notification shall be sent
 // and the tag used
 func createNotifyTimeAndTag(prefix, username string, location *time.Location) (time.Time, string) {
@@ -330,20 +341,10 @@ func main() {
 			switch event := event.(type) {
 			case flowdock.MessageEvent:
 				log.Printf("Message event %v", event)
-				orgNflow := strings.Split(event.Flow, ":")
-				var org string
-				var flow string
-				if len(orgNflow) != 2 {
-					if _, ok := flows[event.Flow]; ok {
-						org = flows[event.Flow].Organization.APIName
-						flow = flows[event.Flow].APIName
-					} else {
-						log.Printf("Odd, we got a message from a flow we do not know, maybe we joined a new channel, reconnecting")
-						break
-					}
-				} else {
-					org = orgNflow[0]
-					flow = orgNflow[1]
+				org, flow, err := organisationAndFlow(event.Flow)
+				if err != nil {
+					log.Printf("Odd, we got a message from a flow we do not know, maybe we joined a new channel, reconnecting")
+					break
 				}
 
 				if _, found := notifications[event.UserID][event.ThreadID]; found {
@@ -369,20 +370,10 @@ func main() {
 				log.Printf("%s said (%s): '%s'", c.DetailsForUser(event.UserID).Nick, event.Flow, event.Content)
 			case flowdock.CommentEvent:
 				log.Println("Comment event")
-				orgNflow := strings.Split(event.Flow, ":")
-				var org string
-				var flow string
-				if len(orgNflow) != 2 {
-					if _, ok := flows[event.Flow]; ok {
-						org = flows[event.Flow].Organization.APIName
-						flow = flows[event.Flow].APIName
-					} else {
-						log.Printf("Odd, we got a message from a flow we do not know, maybe we joined a new channel, reconnecting")
-						break
-					}
-				} else {
-					org = orgNflow[0]
-					flow = orgNflow[1]
+				org, flow, err := organisationAndFlow(event.Flow)
+				if err != nil {
+					log.Printf("Odd, we got a message from a flow we do not know, maybe we joined a new channel, reconnecting")
+					break
 				}
 
 				log.Printf("%s commented (%s): '%s'", c.DetailsForUser(event.UserID).Nick, event.Flow, event.Content.Text)
