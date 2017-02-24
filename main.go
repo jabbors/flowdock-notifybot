@@ -41,6 +41,7 @@ var fasterPrefix = "!!!"
 var rolePrefix = "&"
 var notifRegex *regexp.Regexp
 var roleRegex *regexp.Regexp
+var flows Flows
 var notifications Notifications
 var users Users
 var roles Roles
@@ -244,17 +245,13 @@ func main() {
 		panic(err)
 	}
 
+	flows = NewFlows()
+	for _, flow := range c.AvailableFlows {
+		flows[flow.ID] = flow
+	}
 	// sanity check for flowID
-	if flowID != "" {
-		isKnowFlowID := false
-		for _, flow := range c.AvailableFlows {
-			if flow.ID == flowID {
-				isKnowFlowID = true
-			}
-		}
-		if !isKnowFlowID {
-			panic("flowID is not available with the given API key")
-		}
+	if flowID != "" && !flows.Exists(flowID) {
+		panic("flowID is not available with the given API key")
 	}
 
 	users = NewUsers()
@@ -290,11 +287,6 @@ func main() {
 	roleHelpMessage += " Replace persons in a role by doing " + rolePrefix + "<role>=<nick1>,<nick2>."
 	roleHelpMessage += " List existing roles by doing " + rolePrefix + "list."
 	roleHelpMessage += " List existing users in a role by doing " + rolePrefix + "<role>=list."
-
-	flows := make(map[string]flowdock.Flow)
-	for _, flow := range c.AvailableFlows {
-		flows[flow.ID] = flow
-	}
 
 	//go ticker(&notifications)
 	ticker := time.NewTicker(5 * time.Second)
@@ -439,7 +431,7 @@ func main() {
 						log.Printf("Error could not reconnect %v", err)
 						time.Sleep(15 * time.Second)
 					}
-					flows = make(map[string]flowdock.Flow)
+					flows.Clear()
 					for _, flow := range c.AvailableFlows {
 						flows[flow.ID] = flow
 					}
