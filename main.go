@@ -245,7 +245,7 @@ func main() {
 		log.Fatal("An API key for Flowdock must be specified")
 	}
 
-	notifications := NewNotifications()
+	notifications = NewNotifications()
 	restored, err := notifications.Restore(notificationStorage)
 	log.Printf("Restored %d notifations from file '%s'", restored, notificationStorage)
 
