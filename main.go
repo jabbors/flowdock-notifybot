@@ -45,6 +45,7 @@ var flows Flows
 var notifications Notifications
 var users Users
 var roles Roles
+var pingRolesOnly = false
 
 // Return the next workday (not saturday or sunday) at 9 helsinki time
 func NextWorkdayAtNine() time.Time {
@@ -111,7 +112,9 @@ func pingHandler(org, flow, message, pinger, threadID, eventFlow string, eventID
 		possibleTarget := strings.ToLower(field[2])
 		targets := []string{}
 		if users.Exists(possibleTarget) {
-			targets = append(targets, possibleTarget)
+			if !pingRolesOnly {
+				targets = append(targets, possibleTarget)
+			}
 		} else if roles.Exists(possibleTarget) {
 			targets = append(targets, roles[possibleTarget]...)
 		}
@@ -211,6 +214,7 @@ func main() {
 	flag.StringVar(&configFile, "config", "config.yaml", "Config file to read settings from")
 	flag.BoolVar(&debug, "debug", false, "Run in debug mode, no pings will be sent")
 	flag.StringVar(&flowID, "flow-id", "", "Run in test mode, pings only sent in this flow (organisation:flowname)")
+	flag.BoolVar(&pingRolesOnly, "ping-roles-only", false, "Run in a mode where only pings to a roles will be sent")
 	flag.Parse()
 
 	// Read settings from config file
