@@ -40,6 +40,7 @@ var fastPrefix = "!!"
 var fasterPrefix = "!!!"
 var rolePrefix = "&"
 var notifRegex *regexp.Regexp
+var pingRegex *regexp.Regexp
 var roleRegex *regexp.Regexp
 var flows Flows
 var notifications Notifications
@@ -104,7 +105,8 @@ func createNotifyTimeAndTag(prefix, username string, location *time.Location) (t
 
 // pingHandler creates possible notifications from a message
 func pingHandler(org, flow, message, pinger, threadID, eventFlow string, eventID int64, location *time.Location) {
-	for _, field := range notifRegex.FindAllStringSubmatch(message, -1) {
+	// slow pings
+	for _, field := range pingRegex.FindAllStringSubmatch(message, -1) {
 		if len(field) < 2 {
 			continue
 		}
@@ -135,6 +137,34 @@ func pingHandler(org, flow, message, pinger, threadID, eventFlow string, eventID
 				log.Println("No time was set for notification")
 			}
 		}
+	}
+	// instant role notifies
+	for _, field := range notifRegex.FindAllStringSubmatch(message, -1) {
+		if len(field) < 2 {
+			continue
+		}
+		possibleRoleName := strings.ToLower(field[2])
+
+		if !roles.Exists(possibleRoleName) {
+			continue
+		}
+
+		if len(roles[possibleRoleName]) == 0 {
+			log.Println("No members in role %s to notify", possibleRoleName)
+		}
+
+		targets := ""
+		for i, target := range roles[possibleRoleName] {
+			if i > 0 {
+				targets += " "
+			}
+			targets += fmt.Sprintf("@%s", target)
+		}
+		notifMessage := fmt.Sprintf("%s in role %s notified by %s in %s", targets, possibleRoleName, pinger, flow)
+		// I would be nice to edit the message but only the owner of can change the content
+		// editedMessage := message + " " + targets
+		// flowdock.EditMessageInFlowWithApiKey(flowdockAPIKey, org, flow, strconv.FormatInt(eventID, 10), editedMessage, nil)
+		flowdock.SendMessageToFlowWithApiKey(flowdockAPIKey, eventFlow, threadID, notifMessage)
 	}
 }
 
@@ -284,9 +314,9 @@ func main() {
 		log.Panic("Could not load timeszone info")
 	}
 
-	// build regex for matching pings
-	notifRegex = regexp.MustCompile(fmt.Sprintf(`(\%s+)([\wåäö]+)`, pingPrefix))
-	// and for matching role actions
+	// build regex for matching instant role notifies, ping and role actions
+	notifRegex = regexp.MustCompile(`(@)([\wåäö]+)`)
+	pingRegex = regexp.MustCompile(fmt.Sprintf(`(\%s+)([\wåäö]+)`, pingPrefix))
 	// syntax &[<rolename>][+|-|=][all|<username>](,<username>)
 	roleRegex = regexp.MustCompile(fmt.Sprintf(`(\%s)([\wåäö]+)([+-=])([\wåäö,]+)`, rolePrefix))
 
