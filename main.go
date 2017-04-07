@@ -281,7 +281,7 @@ func main() {
 
 	notifications = NewNotifications()
 	restored, err := notifications.Restore(notificationStorage)
-	log.Printf("Restored %d notifations from file '%s'", restored, notificationStorage)
+	log.Printf("Restored %d notifications from file '%s'", restored, notificationStorage)
 
 	events := make(chan flowdock.Event)
 	c := flowdock.NewClient(flowdockAPIKey)
