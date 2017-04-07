@@ -174,9 +174,9 @@ func roleHandler(org, flow, message string, eventID int64) {
 		if len(field) < 4 {
 			continue
 		}
-		possibleRoleName := field[2]
-		possibleRoleAction := field[3]
-		possibleRoleUsers := strings.Split(field[4], ",")
+		possibleRoleName := strings.ToLower(field[2])
+		possibleRoleAction := strings.ToLower(field[3])
+		possibleRoleUsers := strings.Split(strings.ToLower(field[4]), ",")
 		roleUsers := []string{}
 		// list users in role if requested
 		if roles.Exists(possibleRoleName) && len(possibleRoleUsers) == 1 && possibleRoleUsers[0] == "list" && possibleRoleAction == "=" {

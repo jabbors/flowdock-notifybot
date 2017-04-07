@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
-	"strings"
 )
 
 // Roles is a map of roles and users assinged to a role
@@ -51,7 +50,7 @@ func (r Roles) Save(file string) error {
 
 // Exists returns true the role exits
 func (r Roles) Exists(role string) bool {
-	if _, ok := r[strings.ToLower(role)]; ok {
+	if _, ok := r[role]; ok {
 		return true
 	}
 	return false
