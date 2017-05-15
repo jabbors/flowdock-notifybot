@@ -130,7 +130,7 @@ func pingHandler(org, flow, message, pinger, threadID, eventFlow string, eventID
 			if !notifyTime.IsZero() {
 				log.Printf("%s requested notification for %s at %v", pinger, target, notifyTime)
 				notification := NewNotification(notifyTime, pinger, threadID, eventFlow, eventID)
-				notifications.Add(notification, users[target], eventFlow)
+				notifications.Add(notification, users[target], threadID)
 				flowdock.EditMessageInFlowWithApiKey(flowdockAPIKey, org, flow, strconv.FormatInt(eventID, 10), "", []string{notifyTag})
 				notifications.Save(notificationStorage)
 			} else {
